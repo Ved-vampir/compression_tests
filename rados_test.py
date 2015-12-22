@@ -11,41 +11,44 @@ logger = define_logger(__name__)
 
 
 
-def test_pool(cluster, pool_name, data_func, ob_name="test"):
+def test_pool(cluster, pool_name, datafunc_id, data_func, ob_name="test"):
     """ Test pool pool_name with objects 
         data_func(n) must return string with n bytes """
     # static lens
-    ob_len = [1, 5, 3*1024, 7*1024]
+    ob_len = [1, 5, 761, 3*1024+1, 7*1024-1]
     # random lens
     random.seed()
     ob_len.extend([random.randint(3, 1024*1024*100) for i in range(5)])
     # calc lens
-    mult = [1, 2, 3, 5, 32, 4*256, 8*256, 2*8*256, 3*8*256]
+    mult = [1, 2, 5, 32, 1024, 2*1024, 4*1024, 5*1024]
     for i in mult:
         x = i*4*1024
         ob_len.append(x - 1)
         ob_len.append(x)
         ob_len.append(x + 1)
 
+    ob_len.sort()
     bl_size = [i*4*1024 for i in mult]
     # bl_size.append(1)
     bl_size.append(random.randrange(4*1024, 1024*1024*100, 4*1024))
+    bl_size.sort()
 
     ioctx = cluster.open_ioctx(pool_name)
-
+    logger.info( "Object sizes:" + str(ob_len) )
+    logger.info( "Block sizes:" + str(bl_size) )
     old = ob_name
     for l in ob_len:
-        logger.info("Test for object size %i started", l)
+        logger.info(">>>>>>>> Testing for object size =  %i bytes, datafunc = %i", l, datafunc_id)
         for bl in bl_size:
-            if bl > l and l >= 4*1024:
-                continue
+            #if bl > l and l >= 4*1024:
+            #    continue
             ob_name = old + str(l) + str(bl)
             try:
                 ioctx.remove_object(ob_name)
             except:
                 pass
             # write object
-            logger.info("Write in blocks %i started", bl)
+            logger.info(">>>>>>>>>> Writing (block size=%i bytes)...", bl)
             off = 0
             tl = l
             wdata = ''
@@ -66,59 +69,62 @@ def test_pool(cluster, pool_name, data_func, ob_name="test"):
             # test object
             real_len, _ = ioctx.stat(ob_name)
             if real_len != l:
-                    logger.error("blsize=%i, flen=%i, object stat len=%i", bl, l, real_len)
+                    logger.error(">>>>>>>>>> blsize=%i, flen=%i, object stat len=%i", bl, l, real_len)
                     return -1
             else:
-                logger.debug("object stat is equal to %i", l)
+                logger.debug(">>>>>>>>>> object size = %i", l)
             # read object
-            logger.info("Read started")
             for rbl in ob_len:
-                if rbl > l:
+                if (rbl > l) or ( rbl<256 and l>8*1024) or ( (rbl<4*4096 and rbl <> 4096 ) and l>=4*1024*1024): # do skip very small reads for large objects to speedup the process, leaving 4K read for any object size
                     continue
                 # forward
                 off = 0
                 tl = l
-                logger.debug("Forward read in blocks %i", rbl)
+                logger.info(">>>>>>>>>> Read, block size %i bytes", rbl)
                 while tl > 0:
                     cur = min(rbl, tl)
                     rdata = ioctx.read(ob_name, cur, off)
                     if len(rdata) != cur:
-                        logger.error("forward read, blsize=%i, flen=%i, cannot read %i, read = %i", bl, l, cur, len(rdata))
+                        logger.error(">>>>>>>>>> forward read, blsize=%i, flen=%i, cannot read %i, read = %i", bl, l, cur, len(rdata))
                         return -1
                     else:
-                        logger.debug("forward read, blsize=%i, flen=%i, read %i, more %i", bl, l, cur, tl - cur)
+                        logger.debug(">>>>>>>>>> forward read, blsize=%i, flen=%i, read %i, more %i", bl, l, cur, tl - cur)
                     if rdata != wdata[off:off+cur]:
-                        logger.error("forward read, blsize=%i, flen=%i, data slice is different", bl, l)
-                        logger.debug("read %s, expected %s", rdata, wdata[off:off+cur])
+                        logger.error(">>>>>>>>>> forward read, blsize=%i, flen=%i, data slice is different", bl, l)
+                        logger.debug(">>>>>>>>>> read %s, expected %s", rdata, wdata[off:off+cur])
                         return -1
                     else:
-                        logger.debug("forward read, blsize=%i, flen=%i, data slice is equal", bl, l)
+                        logger.debug(">>>>>>>>>> forward read, blsize=%i, flen=%i, data slice is equal", bl, l)
                     off += cur
                     tl -= cur
                 # backward
-                logger.debug("Backward read in blocks %i", rbl)
+                logger.debug(">>>>>>>>>> Reverse read, block size =  %i bytes", rbl)
                 off = l - rbl
                 tl = l
                 while tl > 0:
                     cur = min(rbl, tl)
                     rdata = ioctx.read(ob_name, cur, off)
                     if len(rdata) != cur:
-                        logger.error("backward read, blsize=%i, flen=%i, cannot read %i, read = %i", bl, l, cur, len(rdata))
+                        logger.error(">>>>>>>>>> backward read, blsize=%i, flen=%i, cannot read %i, read = %i", bl, l, cur, len(rdata))
                         return -1
                     else:
-                        logger.debug("backward read, blsize=%i, flen=%i, read %i, more %i", bl, l, cur, tl - cur)
+                        logger.debug(">>>>>>>>>> backward read, blsize=%i, flen=%i, read %i, more %i", bl, l, cur, tl - cur)
                     if rdata != wdata[off:off+cur]:
-                        logger.error("backward read, blsize=%i, flen=%i, data slice is different", bl, l)
-                        logger.debug("read %s, expected %s", rdata, wdata[off:off+cur])
+                        logger.error(">>>>>>>>>> backward read, blsize=%i, flen=%i, data slice is different", bl, l)
+                        logger.debug(">>>>>>>>>> read %s, expected %s", rdata, wdata[off:off+cur])
                         return -1
                     else:
-                        logger.debug("backward read, blsize=%i, flen=%i, data slice is equal", bl, l)
+                        logger.debug(">>>>>>>>>> backward read, blsize=%i, flen=%i, data slice is equal", bl, l)
                     off -= cur
                     off = max(off, 0)
                     tl -= cur
             # remove object
             if not ioctx.remove_object(ob_name):
-                logger.warning("Cannot delete object")
+                logger.warning(">>>>>>>>>> Cannot delete object")
+            # do not repeat writes that cover all the object more than once
+            if bl > l: 
+              break
+
 
     ioctx.close()
 
@@ -138,11 +144,12 @@ def main(argv):
                  lambda n: os.urandom(n/2).center(n, '\x00')]
 
     for i, datafunc in enumerate(datafuncs):
-        logger.info("Test test_pool by %i func started", i)
-        if test_pool(cluster, pool_name, datafunc):
-            logger.info("Test failed, exit")
+        logger.info(">>>>>> Testing datafunc  %i ... ", i)
+        if test_pool(cluster, pool_name, i, datafunc):
+            logger.error(">>>>>> Test failed, exit")
             cluster.shutdown()
             return -1
+        logger.info(">>>>>> Testing datafunc  %i completed", i)
 
     cluster.shutdown()
 
