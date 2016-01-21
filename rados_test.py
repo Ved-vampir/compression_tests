@@ -11,26 +11,40 @@ logger = define_logger(__name__)
 
 
 
-def test_pool(cluster, pool_name, datafunc_id, data_func, ob_name="test"):
+def test_pool(cluster, pool_name, datafunc_id, data_func, do_reduced_test, ob_name="test"):
     """ Test pool pool_name with objects 
         data_func(n) must return string with n bytes """
     # static lens
-    ob_len = [1, 5, 761, 3*1024+1, 7*1024-1]
+    if not do_reduced_test:
+      ob_len = [1, 5, 761, 3*1024+1, 7*1024-1]
+    else:
+      ob_len = [ 761, 7*1024-1]
+
+
     # random lens
-    random.seed()
-    ob_len.extend([random.randint(3, 1024*1024*100) for i in range(5)])
+    if not do_reduced_test:
+      random.seed()
+      ob_len.extend([random.randint(3, 1024*1024*100) for i in range(5)])
+
     # calc lens
-    mult = [1, 2, 5, 32, 1024, 2*1024, 4*1024, 5*1024]
+    if not do_reduced_test:
+      mult = [1, 2, 5, 32, 1024, 2*1024, 4*1024, 5*1024]
+    else:
+      mult = [1, 32, 5*1024]
+
     for i in mult:
         x = i*4*1024
         ob_len.append(x - 1)
         ob_len.append(x)
         ob_len.append(x + 1)
 
+
     ob_len.sort()
     bl_size = [i*4*1024 for i in mult]
-    # bl_size.append(1)
-    bl_size.append(random.randrange(4*1024, 1024*1024*100, 4*1024))
+
+    if not do_reduced_test:
+      bl_size.append(random.randrange(4*1024, 1024*1024*89, 4*1024))
+
     bl_size.sort()
 
     ioctx = cluster.open_ioctx(pool_name)
@@ -132,8 +146,8 @@ def test_pool(cluster, pool_name, datafunc_id, data_func, ob_name="test"):
 
 def main(argv):
     conf = argv[1] if len(argv) > 1 else '/mnt/other/work/ceph_test/ceph/src/ceph.conf'
+    do_reduced_test = argv[2] == '/reduced' if len(argv)>2 else False
     pool_name = "test"
-
     cluster = connect(conf)
     # if not create_pool(cluster, pool_name, "zlib"):
     #     return -1
@@ -145,7 +159,7 @@ def main(argv):
 
     for i, datafunc in enumerate(datafuncs):
         logger.info(">>>>>> Testing datafunc  %i ... ", i)
-        if test_pool(cluster, pool_name, i, datafunc):
+        if test_pool(cluster, pool_name, i, datafunc, do_reduced_test):
             logger.error(">>>>>> Test failed, exit")
             cluster.shutdown()
             return -1
